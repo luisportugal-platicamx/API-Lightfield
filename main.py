@@ -33,12 +33,12 @@ class AccountRequest(BaseModel):
     account_type: str = Field(default="Customer")
     industry: Optional[List[str]] = ["Tecnología", "SaaS"]
 
-class ContactCreateRequest(BaseModel):
+class ContactByNameRequest(BaseModel):
     first_name: str
     last_name: str
     email: str
     phone: Optional[str] = None
-    account_id: str
+    account_name: str # En lugar de ID, pedimos el nombre
 
 class OpportunityCreateRequest(BaseModel):
     account_id: str
@@ -185,8 +185,14 @@ def api_create_account(payload: AccountRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/contacts", summary="Crear un nuevo Contacto")
-def api_create_contact(payload: ContactCreateRequest):
+@app.post("/contacts/by-account-name", summary="Crear contacto buscando cuenta por nombre")
+def api_create_contact_smart(payload: ContactByNameRequest):
+    # Usamos la función auxiliar que ya tienes para buscar el ID
+    account_id = get_account_id_by_name(payload.account_name)
+    
+    if not account_id:
+        raise HTTPException(status_code=404, detail=f"La cuenta '{payload.account_name}' no existe.")
+    
     try:
         contact_fields = {
             "$name": {"firstName": payload.first_name, "lastName": payload.last_name},
@@ -197,9 +203,9 @@ def api_create_contact(payload: ContactCreateRequest):
 
         response = client.contact.create(
             fields=contact_fields,
-            relationships={"$account": [payload.account_id]}
+            relationships={"$account": [account_id]} # Usamos el ID encontrado
         )
-        return {"success": True, "contact_id": response.id}
+        return {"success": True, "contact_id": response.id, "linked_to_account": payload.account_name}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
