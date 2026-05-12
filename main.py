@@ -27,7 +27,7 @@ app = FastAPI(
 class AccountRequest(BaseModel):
     name: str
     website: str
-    linkedin: str
+    linkedin: Optional[str] = None  # <-- Modificado: Ahora es opcional
     revenue_range: str = Field(default="Less than $1M")
     headcount: str = Field(default="1-10")
     account_type: str = Field(default="Customer")
@@ -170,17 +170,21 @@ def api_create_note_smart(payload: NoteCreateSmartRequest):
 @app.post("/accounts", summary="Crear una nueva Cuenta")
 def api_create_account(payload: AccountRequest):
     try:
-        response = client.account.create(
-            fields={
-                "$name": payload.name,  
-                "$website": [payload.website], 
-                "$linkedIn": payload.linkedin,           
-                "$industry": payload.industry,  
-                "$revenueRange": payload.revenue_range,        
-                "$headcount": payload.headcount,            
-                "type": [payload.account_type], 
-            }
-        )
+        # Construimos los campos base
+        account_fields = {
+            "$name": payload.name,  
+            "$website": [payload.website], 
+            "$industry": payload.industry,  
+            "$revenueRange": payload.revenue_range,        
+            "$headcount": payload.headcount,            
+            "type": [payload.account_type], 
+        }
+        
+        # <-- Modificado: Solo agregamos linkedin si se envió y no está vacío
+        if payload.linkedin:
+            account_fields["$linkedIn"] = payload.linkedin
+            
+        response = client.account.create(fields=account_fields)
         return {"success": True, "account_id": response.id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
