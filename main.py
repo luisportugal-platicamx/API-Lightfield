@@ -185,9 +185,9 @@ def api_create_account(payload: AccountRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/accounts/names", summary="Listar nombres de todas las cuentas")
+@app.get("/accounts/names", summary="Listar nombres e IDs de todas las cuentas")
 def api_list_account_names():
-    names = []
+    accounts = []
     offset = 0
     while True:
         page = client.account.list(limit=25, offset=offset)
@@ -196,11 +196,16 @@ def api_list_account_names():
         for account in page.data:
             name_field = account.fields.get("$name")
             if name_field and name_field.value:
-                names.append(name_field.value)
+                accounts.append({
+                    "name": name_field.value,
+                    "id": account.id
+                })
         offset += 25
         if offset >= page.total_count:
             break
-    return {"success": True, "total": len(names), "names": sorted(names)}
+    accounts.sort(key=lambda x: x["name"])
+    return {"success": True, "total": len(accounts), "accounts": accounts}
+
 
 
 @app.post("/contacts", summary="Crear un nuevo Contacto")
@@ -220,6 +225,34 @@ def api_create_contact(payload: ContactCreateRequest):
         return {"success": True, "contact_id": response.id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/opportunities/names", summary="Listar nombres, IDs y cuenta de todas las oportunidades")
+def api_list_opportunity_names():
+    opportunities = []
+    offset = 0
+    while True:
+        page = client.opportunity.list(limit=25, offset=offset)
+        if not page.data:
+            break
+        for opportunity in page.data:
+            name_field = opportunity.fields.get("$name")
+            if not name_field or not name_field.value:
+                continue
+
+            acc_rel = opportunity.relationships.get("$account")
+            account_id = acc_rel.values[0] if acc_rel and acc_rel.values else None
+           
+            opportunities.append({
+                "name": name_field.value,    
+                "id": opportunity.id,    
+                "account_id": account_id})
+        offset += 25
+        if offset >= page.total_count:
+            break
+    opportunities.sort(key=lambda x: x["name"])
+    return {"success": True, "total": len(opportunities), "opportunities": opportunities}
+
+
 
 @app.post("/opportunities/by-account-name", summary="Crear Oportunidad buscando cuenta por nombre")
 def api_create_opportunity_smart(payload: OpportunityByNameRequest):
