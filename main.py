@@ -27,18 +27,18 @@ app = FastAPI(
 class AccountRequest(BaseModel):
     name: str
     website: str
-    linkedin: Optional[str] = None  # <-- Modificado: Ahora es opcional
+    linkedin: str
     revenue_range: str = Field(default="Less than $1M")
     headcount: str = Field(default="1-10")
     account_type: str = Field(default="Customer")
     industry: Optional[List[str]] = ["Tecnología", "SaaS"]
 
-class ContactByNameRequest(BaseModel):
+class ContactCreateRequest(BaseModel):
     first_name: str
     last_name: str
     email: str
     phone: Optional[str] = None
-    account_name: str # En lugar de ID, pedimos el nombre
+    account_id: str
 
 class OpportunityCreateRequest(BaseModel):
     account_id: str
@@ -170,33 +170,41 @@ def api_create_note_smart(payload: NoteCreateSmartRequest):
 @app.post("/accounts", summary="Crear una nueva Cuenta")
 def api_create_account(payload: AccountRequest):
     try:
-        # Construimos los campos base
-        account_fields = {
-            "$name": payload.name,  
-            "$website": [payload.website], 
-            "$industry": payload.industry,  
-            "$revenueRange": payload.revenue_range,        
-            "$headcount": payload.headcount,            
-            "type": [payload.account_type], 
-        }
-        
-        # <-- Modificado: Solo agregamos linkedin si se envió y no está vacío
-        if payload.linkedin:
-            account_fields["$linkedIn"] = payload.linkedin
-            
-        response = client.account.create(fields=account_fields)
+        response = client.account.create(
+            fields={
+                "$name": payload.name,  
+                "$website": [payload.website], 
+                "$linkedIn": payload.linkedin,           
+                "$industry": payload.industry,  
+                "$revenueRange": payload.revenue_range,        
+                "$headcount": payload.headcount,            
+                "type": [payload.account_type], 
+            }
+        )
         return {"success": True, "account_id": response.id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/contacts/by-account-name", summary="Crear contacto buscando cuenta por nombre")
-def api_create_contact_smart(payload: ContactByNameRequest):
-    # Usamos la función auxiliar que ya tienes para buscar el ID
-    account_id = get_account_id_by_name(payload.account_name)
-    
-    if not account_id:
-        raise HTTPException(status_code=404, detail=f"La cuenta '{payload.account_name}' no existe.")
-    
+@app.get("/accounts/names", summary="Listar nombres de todas las cuentas")
+def api_list_account_names():
+    names = []
+    offset = 0
+    while True:
+        page = client.account.list(limit=25, offset=offset)
+        if not page.data:
+            break
+        for account in page.data:
+            name_field = account.fields.get("$name")
+            if name_field and name_field.value:
+                names.append(name_field.value)
+        offset += 25
+        if offset >= page.total_count:
+            break
+    return {"success": True, "total": len(names), "names": sorted(names)}
+
+
+@app.post("/contacts", summary="Crear un nuevo Contacto")
+def api_create_contact(payload: ContactCreateRequest):
     try:
         contact_fields = {
             "$name": {"firstName": payload.first_name, "lastName": payload.last_name},
@@ -207,9 +215,9 @@ def api_create_contact_smart(payload: ContactByNameRequest):
 
         response = client.contact.create(
             fields=contact_fields,
-            relationships={"$account": [account_id]} # Usamos el ID encontrado
+            relationships={"$account": [payload.account_id]}
         )
-        return {"success": True, "contact_id": response.id, "linked_to_account": payload.account_name}
+        return {"success": True, "contact_id": response.id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
