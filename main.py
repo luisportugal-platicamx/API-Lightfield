@@ -226,6 +226,39 @@ def api_create_contact(payload: ContactCreateRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/contacts/names", summary="Listar nombres e IDs de todos los contactos")
+def api_list_contact_names():
+    contacts = []
+    offset = 0
+    while True:
+        page = client.contact.list(limit=25, offset=offset)
+        if not page.data:
+            break
+        for contact in page.data:
+            name_field = contact.fields.get("$name")
+            if not name_field or not name_field.value:
+                continue
+
+            name_value = name_field.value
+            full_name = f"{name_value.get('firstName') or ''}{name_value.get('lastName') or ''}".strip()
+            if not full_name:
+                continue
+
+            acc_rel = contact.relationships.get("$account")
+            account_id = acc_rel.values[0] if acc_rel and acc_rel.values else None
+
+            contacts.append({
+                "name": full_name,
+                "id": contact.id,
+                "account_id": account_id
+            })
+        offset += 25
+        if offset >= page.total_count:
+            break
+    contacts.sort(key=lambda x: x["name"])
+    return {"success": True, "total": len(contacts), "contacts": contacts}
+
+
 @app.get("/opportunities/names", summary="Listar nombres, IDs y cuenta de todas las oportunidades")
 def api_list_opportunity_names():
     opportunities = []
