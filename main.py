@@ -28,10 +28,9 @@ class AccountRequest(BaseModel):
     name: str
     website: str
     linkedin: str
-    revenue_range: str = Field(default="Less than $1M")
-    headcount: str = Field(default="1-10")
-    account_type: str = Field(default="Customer")
-    industry: Optional[List[str]] = ["Tecnología", "SaaS"]
+    revenue_range: Optional[str] = None
+    headcount: Optional[str] = None
+    account_type: Optional[str] = None
 
 class ContactCreateRequest(BaseModel):
     first_name: str
