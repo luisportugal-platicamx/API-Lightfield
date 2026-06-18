@@ -31,6 +31,7 @@ class AccountRequest(BaseModel):
     revenue_range: Optional[str] = None
     headcount: Optional[str] = None
     account_type: Optional[str] = None
+    industry: Optional[List[str]] = None
 
 class ContactCreateRequest(BaseModel):
     first_name: str
@@ -169,18 +170,34 @@ def api_create_note_smart(payload: NoteCreateSmartRequest):
 @app.post("/accounts", summary="Crear una nueva Cuenta")
 def api_create_account(payload: AccountRequest):
     try:
-        response = client.account.create(
-            fields={
-                "$name": payload.name,  
-                "$website": [payload.website], 
-                "$linkedIn": payload.linkedin,           
-                "$industry": payload.industry,  
-                "$revenueRange": payload.revenue_range,        
-                "$headcount": payload.headcount,            
-                "type": [payload.account_type], 
-            }
-        )
+        # 1. Agregamos el campo obligatorio
+        account_fields = {
+            "$name": payload.name,
+        }
+        
+        # 2. Agregamos los opcionales solo si traen datos (no son None)
+        if payload.website:
+            account_fields["$website"] = [payload.website]
+            
+        if payload.linkedin:
+            account_fields["$linkedIn"] = payload.linkedin
+            
+        if payload.industry:
+            account_fields["$industry"] = payload.industry
+            
+        if payload.revenue_range:
+            account_fields["$revenueRange"] = payload.revenue_range
+            
+        if payload.headcount:
+            account_fields["$headcount"] = payload.headcount
+            
+        if payload.account_type:
+            account_fields["type"] = [payload.account_type] # Nota: Si tu CRM usa "$type" con signo de pesos, cámbialo aquí.
+
+        # 3. Disparamos a Lightfield
+        response = client.account.create(fields=account_fields)
         return {"success": True, "account_id": response.id}
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
