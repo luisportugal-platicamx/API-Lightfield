@@ -19,7 +19,7 @@ client = Lightfield(api_key=API_KEY)
 app = FastAPI(
     title="Lightfield Middleware API",
     description="API para automatizar Cuentas, Contactos y Oportunidades",
-    version="2.4.0"
+    version="2.5.0"
 )
 
 # --- TRADUCTOR DE CAMPOS SINGLE_SELECT ---
@@ -317,17 +317,36 @@ def api_create_contact(payload: ContactCreateRequest):
 def api_list_contact_names():
     contacts = []
     offset = 0
+
     while True:
         page = client.contact.list(limit=25, offset=offset)
         if not page.data:
             break
+
         for contact in page.data:
             name_field = contact.fields.get("$name")
-            if not name_field or not name_field.value:
+            if not name_field or name_field.value is None:
                 continue
 
-            name_value = name_field.value
-            full_name = f"{name_value.get('firstName') or ''} {name_value.get('lastName') or ''}".strip()
+            nv = name_field.value
+
+            # Normalizamos a dict sin importar cómo lo envuelva el SDK:
+            # - objeto Pydantic (FullName) -> model_dump()
+            # - dict crudo -> tal cual
+            if hasattr(nv, "model_dump"):
+                nv = nv.model_dump()
+
+            if isinstance(nv, dict):
+                # Cubrimos camelCase y snake_case por si acaso
+                first = nv.get("firstName") or nv.get("first_name") or ""
+                last = nv.get("lastName") or nv.get("last_name") or ""
+            else:
+                first = (getattr(nv, "firstName", None)
+                         or getattr(nv, "first_name", None) or "")
+                last = (getattr(nv, "lastName", None)
+                        or getattr(nv, "last_name", None) or "")
+
+            full_name = f"{first} {last}".strip()
             if not full_name:
                 continue
 
@@ -339,7 +358,9 @@ def api_list_contact_names():
                 "id": contact.id,
                 "account_id": account_id
             })
+
         offset += 25
+
     contacts.sort(key=lambda x: x["name"])
     return {"success": True, "total": len(contacts), "contacts": contacts}
 
