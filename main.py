@@ -19,7 +19,7 @@ client = Lightfield(api_key=API_KEY)
 app = FastAPI(
     title="Lightfield Middleware API",
     description="API para automatizar Cuentas, Contactos y Oportunidades",
-    version="2.3"   # <-- cámbialo
+    version="2.4.0"
 )
 
 # --- TRADUCTOR DE CAMPOS SINGLE_SELECT ---
@@ -317,36 +317,17 @@ def api_create_contact(payload: ContactCreateRequest):
 def api_list_contact_names():
     contacts = []
     offset = 0
-
     while True:
         page = client.contact.list(limit=25, offset=offset)
         if not page.data:
             break
-
         for contact in page.data:
             name_field = contact.fields.get("$name")
-            if not name_field or name_field.value is None:
+            if not name_field or not name_field.value:
                 continue
 
-            nv = name_field.value
-
-            # Normalizamos a dict sin importar cómo lo envuelva el SDK:
-            # - objeto Pydantic (FullName) -> model_dump()
-            # - dict crudo -> tal cual
-            if hasattr(nv, "model_dump"):
-                nv = nv.model_dump()
-
-            if isinstance(nv, dict):
-                # Cubrimos camelCase y snake_case por si acaso
-                first = nv.get("firstName") or nv.get("first_name") or ""
-                last = nv.get("lastName") or nv.get("last_name") or ""
-            else:
-                first = (getattr(nv, "firstName", None)
-                         or getattr(nv, "first_name", None) or "")
-                last = (getattr(nv, "lastName", None)
-                        or getattr(nv, "last_name", None) or "")
-
-            full_name = f"{first} {last}".strip()
+            name_value = name_field.value
+            full_name = f"{name_value.get('firstName') or ''} {name_value.get('lastName') or ''}".strip()
             if not full_name:
                 continue
 
@@ -358,12 +339,33 @@ def api_list_contact_names():
                 "id": contact.id,
                 "account_id": account_id
             })
-
         offset += 25
-
     contacts.sort(key=lambda x: x["name"])
     return {"success": True, "total": len(contacts), "contacts": contacts}
 
+@app.get("/opportunities/names", summary="Listar nombres, IDs y cuenta de todas las oportunidades")
+def api_list_opportunity_names():
+    opportunities = []
+    offset = 0
+    while True:
+        page = client.opportunity.list(limit=25, offset=offset)
+        if not page.data:
+            break
+        for opportunity in page.data:
+            name_field = opportunity.fields.get("$name")
+            if not name_field or not name_field.value:
+                continue
+
+            acc_rel = opportunity.relationships.get("$account")
+            account_id = acc_rel.values[0] if acc_rel and acc_rel.values else None
+
+            opportunities.append({
+                "name": name_field.value,
+                "id": opportunity.id,
+                "account_id": account_id})
+        offset += 25
+    opportunities.sort(key=lambda x: x["name"])
+    return {"success": True, "total": len(opportunities), "opportunities": opportunities}
 
 @app.post("/opportunities/by-account-name", summary="Crear Oportunidad buscando cuenta por nombre")
 def api_create_opportunity_smart(payload: OpportunityByNameRequest):
@@ -415,35 +417,3 @@ def api_update_opportunity_by_name(payload: OpportunityUpdateByNameRequest):
         return {"success": True, "message": "Oportunidad actualizada", "opportunity_id": response.id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=repr(e))
-
-@app.get("/debug/whoami", summary="Verificar identidad/key en este entorno")
-def api_debug_whoami():
-    key = os.getenv("LIGHTFIELD_API_KEY") or ""
-    info = {
-        "key_present": bool(key),
-        "key_length": len(key),
-        "key_preview": (key[:6] + "..." + key[-4:]) if len(key) > 12 else "TOO_SHORT",
-    }
-    # Cuenta cuántos contactos ve esta key, leyendo totalCount directo
-    try:
-        page = client.contact.list(limit=25, offset=0)
-        info["contacts_total_count"] = getattr(page, "total_count", None) or getattr(page, "totalCount", None)
-        info["first_page_len"] = len(page.data) if page.data else 0
-    except Exception as e:
-        info["error"] = repr(e)
-    return info
-
-@app.get("/debug/contact-raw", summary="Ver estructura cruda de un contacto vía HTTP directo")
-def api_debug_contact_raw():
-    url = "https://api.lightfield.app/v1/contacts?limit=1&offset=0"
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Lightfield-Version": "2026-03-01",
-        "Content-Type": "application/json",
-    }
-    r = requests.get(url, headers=headers)
-    return {
-        "status": r.status_code,
-        "version_marker": "contact-raw-v1",  # para confirmar que corre ESटE código
-        "body": r.json() if r.status_code == 200 else r.text,
-    }
