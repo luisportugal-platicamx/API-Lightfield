@@ -352,30 +352,65 @@ def api_list_contact_names():
     contacts.sort(key=lambda x: x["name"])
     return {"success": True, "total": len(contacts), "contacts": contacts}
 
-@app.get("/opportunities/names", summary="Listar nombres, IDs y cuenta de todas las oportunidades")
-def api_list_opportunity_names():
-    opportunities = []
+@app.get("/contacts/names", summary="Listar nombres e IDs de todos los contactos")
+def api_list_contact_names():
+    contacts = []
     offset = 0
+    debug = {"pages": [], "skipped_no_name": 0, "errors": []}
+
     while True:
-        page = client.opportunity.list(limit=25, offset=offset)
+        try:
+            page = client.contact.list(limit=25, offset=offset)
+        except Exception as e:
+            debug["errors"].append(f"list(offset={offset}) -> {e!r}")
+            break
+
+        page_len = len(page.data) if page.data else 0
+        debug["pages"].append({"offset": offset, "len": page_len})
+
         if not page.data:
             break
-        for opportunity in page.data:
-            name_field = opportunity.fields.get("$name")
-            if not name_field or not name_field.value:
-                continue
 
-            acc_rel = opportunity.relationships.get("$account")
-            account_id = acc_rel.values[0] if acc_rel and acc_rel.values else None
+        for contact in page.data:
+            try:
+                name_field = contact.fields.get("$name")
+                if not name_field or name_field.value is None:
+                    debug["skipped_no_name"] += 1
+                    continue
 
-            opportunities.append({
-                "name": name_field.value,
-                "id": opportunity.id,
-                "account_id": account_id})
+                nv = name_field.value
+                if isinstance(nv, dict):
+                    first = nv.get("firstName") or ""
+                    last = nv.get("lastName") or ""
+                else:
+                    first = getattr(nv, "firstName", "") or ""
+                    last = getattr(nv, "lastName", "") or ""
+
+                full_name = f"{first} {last}".strip()
+                if not full_name:
+                    debug["skipped_no_name"] += 1
+                    continue
+
+                acc_rel = contact.relationships.get("$account")
+                account_id = acc_rel.values[0] if acc_rel and acc_rel.values else None
+
+                contacts.append({
+                    "name": full_name,
+                    "id": contact.id,
+                    "account_id": account_id
+                })
+            except Exception as e:
+                debug["errors"].append(f"contact {getattr(contact,'id','?')} -> {e!r}")
+
         offset += 25
-    opportunities.sort(key=lambda x: x["name"])
-    return {"success": True, "total": len(opportunities), "opportunities": opportunities}
 
+        # Cortafuegos: evita bucle infinito si offset no avanza bien
+        if offset > 5000:
+            debug["errors"].append("offset > 5000, corte de seguridad")
+            break
+
+    contacts.sort(key=lambda x: x["name"])
+    return {"success": True, "total": len(contacts), "contacts": contacts, "_debug": debug}
 @app.post("/opportunities/by-account-name", summary="Crear Oportunidad buscando cuenta por nombre")
 def api_create_opportunity_smart(payload: OpportunityByNameRequest):
     account_id = get_account_id_by_name(payload.account_name)
