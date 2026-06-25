@@ -426,3 +426,20 @@ def api_update_opportunity_by_name(payload: OpportunityUpdateByNameRequest):
         return {"success": True, "message": "Oportunidad actualizada", "opportunity_id": response.id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=repr(e))
+
+@app.get("/debug/whoami", summary="Verificar identidad/key en este entorno")
+def api_debug_whoami():
+    key = os.getenv("LIGHTFIELD_API_KEY") or ""
+    info = {
+        "key_present": bool(key),
+        "key_length": len(key),
+        "key_preview": (key[:6] + "..." + key[-4:]) if len(key) > 12 else "TOO_SHORT",
+    }
+    # Cuenta cuántos contactos ve esta key, leyendo totalCount directo
+    try:
+        page = client.contact.list(limit=25, offset=0)
+        info["contacts_total_count"] = getattr(page, "total_count", None) or getattr(page, "totalCount", None)
+        info["first_page_len"] = len(page.data) if page.data else 0
+    except Exception as e:
+        info["error"] = repr(e)
+    return info
