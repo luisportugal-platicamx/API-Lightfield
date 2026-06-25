@@ -19,7 +19,7 @@ client = Lightfield(api_key=API_KEY)
 app = FastAPI(
     title="Lightfield Middleware API",
     description="API para automatizar Cuentas, Contactos y Oportunidades",
-    version="2.2.2-debug"   # <-- cámbialo
+    version="2.3"   # <-- cámbialo
 )
 
 # --- TRADUCTOR DE CAMPOS SINGLE_SELECT ---
@@ -317,7 +317,6 @@ def api_create_contact(payload: ContactCreateRequest):
 def api_list_contact_names():
     contacts = []
     offset = 0
-    sample = None  # guardamos el primer contacto para inspección
 
     while True:
         page = client.contact.list(limit=25, offset=offset)
@@ -325,29 +324,27 @@ def api_list_contact_names():
             break
 
         for contact in page.data:
-            if sample is None:
-                # Capturamos la estructura cruda del primer contacto
-                try:
-                    raw = contact.model_dump()
-                except Exception:
-                    raw = str(contact)
-                sample = {
-                    "fields_keys": list(contact.fields.keys()) if hasattr(contact, "fields") else None,
-                    "name_field_repr": repr(contact.fields.get("$name")) if hasattr(contact, "fields") else None,
-                    "raw": raw,
-                }
-
             name_field = contact.fields.get("$name")
             if not name_field or name_field.value is None:
                 continue
 
             nv = name_field.value
+
+            # Normalizamos a dict sin importar cómo lo envuelva el SDK:
+            # - objeto Pydantic (FullName) -> model_dump()
+            # - dict crudo -> tal cual
+            if hasattr(nv, "model_dump"):
+                nv = nv.model_dump()
+
             if isinstance(nv, dict):
-                first = nv.get("firstName") or ""
-                last = nv.get("lastName") or ""
+                # Cubrimos camelCase y snake_case por si acaso
+                first = nv.get("firstName") or nv.get("first_name") or ""
+                last = nv.get("lastName") or nv.get("last_name") or ""
             else:
-                first = getattr(nv, "firstName", "") or ""
-                last = getattr(nv, "lastName", "") or ""
+                first = (getattr(nv, "firstName", None)
+                         or getattr(nv, "first_name", None) or "")
+                last = (getattr(nv, "lastName", None)
+                        or getattr(nv, "last_name", None) or "")
 
             full_name = f"{first} {last}".strip()
             if not full_name:
@@ -355,14 +352,17 @@ def api_list_contact_names():
 
             acc_rel = contact.relationships.get("$account")
             account_id = acc_rel.values[0] if acc_rel and acc_rel.values else None
-            contacts.append({"name": full_name, "id": contact.id, "account_id": account_id})
+
+            contacts.append({
+                "name": full_name,
+                "id": contact.id,
+                "account_id": account_id
+            })
 
         offset += 25
-        if offset > 5000:
-            break
 
     contacts.sort(key=lambda x: x["name"])
-    return {"success": True, "total": len(contacts), "contacts": contacts, "_sample": sample}
+    return {"success": True, "total": len(contacts), "contacts": contacts}
 
 
 @app.post("/opportunities/by-account-name", summary="Crear Oportunidad buscando cuenta por nombre")
