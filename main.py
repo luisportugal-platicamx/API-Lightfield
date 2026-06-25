@@ -19,7 +19,7 @@ client = Lightfield(api_key=API_KEY)
 app = FastAPI(
     title="Lightfield Middleware API",
     description="API para automatizar Cuentas, Contactos y Oportunidades",
-    version="2.2.1-debug"   # <-- cámbialo
+    version="2.2.2-debug"   # <-- cámbialo
 )
 
 # --- TRADUCTOR DE CAMPOS SINGLE_SELECT ---
@@ -432,3 +432,18 @@ def api_debug_whoami():
     except Exception as e:
         info["error"] = repr(e)
     return info
+
+@app.get("/debug/contact-raw", summary="Ver estructura cruda de un contacto vía HTTP directo")
+def api_debug_contact_raw():
+    url = "https://api.lightfield.app/v1/contacts?limit=1&offset=0"
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Lightfield-Version": "2026-03-01",
+        "Content-Type": "application/json",
+    }
+    r = requests.get(url, headers=headers)
+    return {
+        "status": r.status_code,
+        "version_marker": "contact-raw-v1",  # para confirmar que corre ESटE código
+        "body": r.json() if r.status_code == 200 else r.text,
+    }
