@@ -19,7 +19,7 @@ client = Lightfield(api_key=API_KEY)
 app = FastAPI(
     title="Lightfield Middleware API",
     description="API para automatizar Cuentas, Contactos y Oportunidades",
-    version="2.2.0-debug"   # <-- cámbialo
+    version="2.2.1-debug"   # <-- cámbialo
 )
 
 # --- TRADUCTOR DE CAMPOS SINGLE_SELECT ---
@@ -317,121 +317,54 @@ def api_create_contact(payload: ContactCreateRequest):
 def api_list_contact_names():
     contacts = []
     offset = 0
-    debug = {"pages": [], "skipped_no_name": 0, "errors": []}
+    sample = None  # guardamos el primer contacto para inspección
 
     while True:
-        try:
-            page = client.contact.list(limit=25, offset=offset)
-        except Exception as e:
-            debug["errors"].append(f"list(offset={offset}) -> {e!r}")
-            break
-
-        page_len = len(page.data) if page.data else 0
-        debug["pages"].append({"offset": offset, "len": page_len})
-
+        page = client.contact.list(limit=25, offset=offset)
         if not page.data:
             break
 
         for contact in page.data:
-            try:
-                name_field = contact.fields.get("$name")
-                if not name_field or name_field.value is None:
-                    debug["skipped_no_name"] += 1
-                    continue
+            if sample is None:
+                # Capturamos la estructura cruda del primer contacto
+                try:
+                    raw = contact.model_dump()
+                except Exception:
+                    raw = str(contact)
+                sample = {
+                    "fields_keys": list(contact.fields.keys()) if hasattr(contact, "fields") else None,
+                    "name_field_repr": repr(contact.fields.get("$name")) if hasattr(contact, "fields") else None,
+                    "raw": raw,
+                }
 
-                nv = name_field.value
-                if isinstance(nv, dict):
-                    first = nv.get("firstName") or ""
-                    last = nv.get("lastName") or ""
-                else:
-                    first = getattr(nv, "firstName", "") or ""
-                    last = getattr(nv, "lastName", "") or ""
+            name_field = contact.fields.get("$name")
+            if not name_field or name_field.value is None:
+                continue
 
-                full_name = f"{first} {last}".strip()
-                if not full_name:
-                    debug["skipped_no_name"] += 1
-                    continue
+            nv = name_field.value
+            if isinstance(nv, dict):
+                first = nv.get("firstName") or ""
+                last = nv.get("lastName") or ""
+            else:
+                first = getattr(nv, "firstName", "") or ""
+                last = getattr(nv, "lastName", "") or ""
 
-                acc_rel = contact.relationships.get("$account")
-                account_id = acc_rel.values[0] if acc_rel and acc_rel.values else None
+            full_name = f"{first} {last}".strip()
+            if not full_name:
+                continue
 
-                contacts.append({
-                    "name": full_name,
-                    "id": contact.id,
-                    "account_id": account_id
-                })
-            except Exception as e:
-                debug["errors"].append(f"contact {getattr(contact,'id','?')} -> {e!r}")
+            acc_rel = contact.relationships.get("$account")
+            account_id = acc_rel.values[0] if acc_rel and acc_rel.values else None
+            contacts.append({"name": full_name, "id": contact.id, "account_id": account_id})
 
         offset += 25
-
-        # Cortafuegos: evita bucle infinito si offset no avanza bien
         if offset > 5000:
-            debug["errors"].append("offset > 5000, corte de seguridad")
             break
 
     contacts.sort(key=lambda x: x["name"])
-    return {"success": True, "total": len(contacts), "contacts": contacts, "_debug": debug}
+    return {"success": True, "total": len(contacts), "contacts": contacts, "_sample": sample}
 
-@app.get("/contacts/names", summary="Listar nombres e IDs de todos los contactos")
-def api_list_contact_names():
-    contacts = []
-    offset = 0
-    debug = {"pages": [], "skipped_no_name": 0, "errors": []}
 
-    while True:
-        try:
-            page = client.contact.list(limit=25, offset=offset)
-        except Exception as e:
-            debug["errors"].append(f"list(offset={offset}) -> {e!r}")
-            break
-
-        page_len = len(page.data) if page.data else 0
-        debug["pages"].append({"offset": offset, "len": page_len})
-
-        if not page.data:
-            break
-
-        for contact in page.data:
-            try:
-                name_field = contact.fields.get("$name")
-                if not name_field or name_field.value is None:
-                    debug["skipped_no_name"] += 1
-                    continue
-
-                nv = name_field.value
-                if isinstance(nv, dict):
-                    first = nv.get("firstName") or ""
-                    last = nv.get("lastName") or ""
-                else:
-                    first = getattr(nv, "firstName", "") or ""
-                    last = getattr(nv, "lastName", "") or ""
-
-                full_name = f"{first} {last}".strip()
-                if not full_name:
-                    debug["skipped_no_name"] += 1
-                    continue
-
-                acc_rel = contact.relationships.get("$account")
-                account_id = acc_rel.values[0] if acc_rel and acc_rel.values else None
-
-                contacts.append({
-                    "name": full_name,
-                    "id": contact.id,
-                    "account_id": account_id
-                })
-            except Exception as e:
-                debug["errors"].append(f"contact {getattr(contact,'id','?')} -> {e!r}")
-
-        offset += 25
-
-        # Cortafuegos: evita bucle infinito si offset no avanza bien
-        if offset > 5000:
-            debug["errors"].append("offset > 5000, corte de seguridad")
-            break
-
-    contacts.sort(key=lambda x: x["name"])
-    return {"success": True, "total": len(contacts), "contacts": contacts, "_debug": debug}
 @app.post("/opportunities/by-account-name", summary="Crear Oportunidad buscando cuenta por nombre")
 def api_create_opportunity_smart(payload: OpportunityByNameRequest):
     account_id = get_account_id_by_name(payload.account_name)
