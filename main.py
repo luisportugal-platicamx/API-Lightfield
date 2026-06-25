@@ -326,8 +326,17 @@ def api_list_contact_names():
             if not name_field or not name_field.value:
                 continue
 
-            name_value = name_field.value
-            full_name = f"{name_value.get('firstName') or ''} {name_value.get('lastName') or ''}".strip()
+            nv = name_field.value
+            # El SDK puede devolver un objeto FullName (con atributos)
+            # o un dict {'firstName': ..., 'lastName': ...}
+            if isinstance(nv, dict):
+                first = nv.get("firstName") or ""
+                last = nv.get("lastName") or ""
+            else:
+                first = getattr(nv, "firstName", "") or ""
+                last = getattr(nv, "lastName", "") or ""
+
+            full_name = f"{first} {last}".strip()
             if not full_name:
                 continue
 
