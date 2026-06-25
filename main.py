@@ -19,7 +19,7 @@ client = Lightfield(api_key=API_KEY)
 app = FastAPI(
     title="Lightfield Middleware API",
     description="API para automatizar Cuentas, Contactos y Oportunidades",
-    version="2.5.0"
+    version="2.6.0"
 )
 
 # --- TRADUCTOR DE CAMPOS SINGLE_SELECT ---
@@ -140,11 +140,11 @@ class AccountRequest(BaseModel):
     industry: Optional[List[str]] = ["Tecnología", "SaaS"]
 
 class ContactCreateRequest(BaseModel):
-    first_name: str
-    last_name: str
-    email: str
-    phone: Optional[str] = None
-    account_id: str
+    first_name: str               # OBLIGATORIO
+    last_name: str                # OBLIGATORIO
+    phone: str                    # OBLIGATORIO
+    email: Optional[str] = None   # opcional
+    account_id: Optional[str] = None  # opcional (si no viene, el contacto no se enlaza a cuenta)
 
 class OpportunityByNameRequest(BaseModel):
     account_name: str
@@ -300,15 +300,17 @@ def api_create_contact(payload: ContactCreateRequest):
     try:
         contact_fields = {
             "$name": {"firstName": payload.first_name, "lastName": payload.last_name},
-            "$email": [payload.email]
+            "$phone": [payload.phone],
         }
-        if payload.phone:
-            contact_fields["$phone"] = [payload.phone]
+        if payload.email:
+            contact_fields["$email"] = [payload.email]
 
-        response = client.contact.create(
-            fields=contact_fields,
-            relationships={"$account": [payload.account_id]}
-        )
+        # La cuenta solo se enlaza si se proporcionó account_id
+        kwargs = {"fields": contact_fields}
+        if payload.account_id:
+            kwargs["relationships"] = {"$account": [payload.account_id]}
+
+        response = client.contact.create(**kwargs)
         return {"success": True, "contact_id": response.id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -317,36 +319,17 @@ def api_create_contact(payload: ContactCreateRequest):
 def api_list_contact_names():
     contacts = []
     offset = 0
-
     while True:
         page = client.contact.list(limit=25, offset=offset)
         if not page.data:
             break
-
         for contact in page.data:
             name_field = contact.fields.get("$name")
-            if not name_field or name_field.value is None:
+            if not name_field or not name_field.value:
                 continue
 
-            nv = name_field.value
-
-            # Normalizamos a dict sin importar cómo lo envuelva el SDK:
-            # - objeto Pydantic (FullName) -> model_dump()
-            # - dict crudo -> tal cual
-            if hasattr(nv, "model_dump"):
-                nv = nv.model_dump()
-
-            if isinstance(nv, dict):
-                # Cubrimos camelCase y snake_case por si acaso
-                first = nv.get("firstName") or nv.get("first_name") or ""
-                last = nv.get("lastName") or nv.get("last_name") or ""
-            else:
-                first = (getattr(nv, "firstName", None)
-                         or getattr(nv, "first_name", None) or "")
-                last = (getattr(nv, "lastName", None)
-                        or getattr(nv, "last_name", None) or "")
-
-            full_name = f"{first} {last}".strip()
+            name_value = name_field.value
+            full_name = f"{name_value.get('firstName') or ''} {name_value.get('lastName') or ''}".strip()
             if not full_name:
                 continue
 
@@ -358,9 +341,7 @@ def api_list_contact_names():
                 "id": contact.id,
                 "account_id": account_id
             })
-
         offset += 25
-
     contacts.sort(key=lambda x: x["name"])
     return {"success": True, "total": len(contacts), "contacts": contacts}
 
